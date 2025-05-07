@@ -4,9 +4,11 @@ const path = require('path');
 
 // Path to the files (adjust these to match your actual file paths)
 const OLD_JSON_PATH = path.join(__dirname, 'old-data.json');
-const SOURCE_JS_PATH = path.join(__dirname, 'ghl-connection.js'); // or the file containing your JS data
+const SOURCE_JS_PATH = path.join(__dirname, 'ghl-connection.js');
 const OUTPUT_JSON_PATH = path.join(__dirname, 'updated-data.json');
 const OUTPUT_XLSX_PATH = path.join(__dirname, 'updated-data.xlsx');
+const CHANGED_JSON_PATH = path.join(__dirname, 'changed-entries.json');
+const CHANGED_XLSX_PATH = path.join(__dirname, 'changed-entries.xlsx');
 
 // Function to extract location data from the JS file
 function extractDataFromJsFile(jsContent) {
@@ -37,9 +39,13 @@ function updateJsonData(jsonData, jsDataMap) {
   console.log(`Found ${jsDataMap.size} entries in JS file`);
   
   let updatedCount = 0;
-  const updatedData = jsonData.map(item => {
+  const updatedData = [];
+  const changedEntries = [];
+  
+  jsonData.forEach(item => {
     const micrositeName = item["Microsite Name"];
     const jsData = jsDataMap.get(micrositeName);
+    let wasChanged = false;
     
     // If we have matching data from the JS file
     if (jsData) {
@@ -50,31 +56,42 @@ function updateJsonData(jsonData, jsDataMap) {
       if (!idMatch) {
         console.log(`Updating ID for ${micrositeName}: ${item["GHL Location ID"]} -> ${jsData.ghlLocationId}`);
         item["GHL Location ID"] = jsData.ghlLocationId;
+        wasChanged = true;
       }
       
       if (!tokenMatch) {
         console.log(`Updating Token for ${micrositeName}: ${item["Location Token"]} -> ${jsData.locationToken}`);
         item["Location Token"] = jsData.locationToken;
+        wasChanged = true;
       }
       
       // Add the updated property based on what was changed
       if (!idMatch && !tokenMatch) {
         item["updated"] = "ID/Token";
         updatedCount++;
+        wasChanged = true;
       } else if (!idMatch) {
         item["updated"] = "ID";
         updatedCount++;
+        wasChanged = true;
       } else if (!tokenMatch) {
         item["updated"] = "Token";
         updatedCount++;
+        wasChanged = true;
       }
     }
     
-    return item;
+    // Add to updated data
+    updatedData.push(item);
+    
+    // If this entry was changed, add to changedEntries array
+    if (wasChanged) {
+      changedEntries.push(item);
+    }
   });
 
   console.log(`Updated ${updatedCount} entries in total`);
-  return updatedData;
+  return { updatedData, changedEntries };
 }
 
 // Function to create Excel file from JSON data
@@ -121,15 +138,27 @@ async function main() {
     const jsDataMap = extractDataFromJsFile(jsContent);
     console.log(`Extracted data from JS file (${jsDataMap.size} entries)`);
     
-    // Update the JSON data
-    const updatedJson = updateJsonData(jsonData, jsDataMap);
+    // Update the JSON data and get changed entries
+    const { updatedData, changedEntries } = updateJsonData(jsonData, jsDataMap);
     
     // Write the updated JSON to a file
-    fs.writeFileSync(OUTPUT_JSON_PATH, JSON.stringify(updatedJson, null, 2), 'utf8');
+    fs.writeFileSync(OUTPUT_JSON_PATH, JSON.stringify(updatedData, null, 2), 'utf8');
     console.log(`Successfully wrote updated data to ${OUTPUT_JSON_PATH}`);
     
-    // Create Excel file
-    createExcelFile(updatedJson, OUTPUT_XLSX_PATH);
+    // Create Excel file for all entries
+    createExcelFile(updatedData, OUTPUT_XLSX_PATH);
+    
+    // Check if we have changed entries
+    if (changedEntries.length > 0) {
+      // Write changed entries to JSON file
+      fs.writeFileSync(CHANGED_JSON_PATH, JSON.stringify(changedEntries, null, 2), 'utf8');
+      console.log(`Successfully wrote ${changedEntries.length} changed entries to ${CHANGED_JSON_PATH}`);
+      
+      // Create Excel file for changed entries
+      createExcelFile(changedEntries, CHANGED_XLSX_PATH);
+    } else {
+      console.log('No entries were changed, so changed-entries files were not created.');
+    }
     
   } catch (error) {
     console.error('Error:', error.message);
